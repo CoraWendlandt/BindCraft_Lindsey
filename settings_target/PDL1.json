@@ -1,9 +1,11 @@
 {
-    "design_path": "/content/drive/My Drive/BindCraft/PDL1/",
+    "design_path": "/home/lindsey/fork/BindCraft/example",
     "binder_name": "PDL1",
-    "starting_pdb": "/content/bindcraft/example/PDL1.pdb",
+    "starting_pdb": "/home/lindsey/fork/BindCraft/example/PDL1.pdb",
     "chains": "A",
     "target_hotspot_residues": "56",
-    "lengths": [65, 150],
-    "number_of_final_designs": 100
+    "lengths": [10, 20],
+    "number_of_final_designs": 100,
+    "negative_paths": ["/home/lindsey/fork/BindCraft/example/2P8V.pdb"],
+    "negative_chains": ["A"]
 }

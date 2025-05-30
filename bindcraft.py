@@ -102,13 +102,43 @@ while True:
     trajectory_dirs = ["Trajectory", "Trajectory/Relaxed", "Trajectory/LowConfidence", "Trajectory/Clashing"]
     trajectory_exists = any(os.path.exists(os.path.join(design_paths[trajectory_dir], design_name + ".pdb")) for trajectory_dir in trajectory_dirs)
 
+    # create main target object
+    main_target = target(target_settings['starting_pdb'],
+                         target_settings['chains'],
+                         target_settings['target_hotspot_residues']
+                        )
+    
+    # create negative target objects
+    if 'negative_paths' in target_settings:
+        negative_paths = target_settings['negative_paths']
+        negative_chains = target_settings['negative_chains']
+    else:
+        negative_paths = []
+        negative_chains = []
+
+    negative_targets = []
+    for negative_path, negative_chain in zip(negative_paths, negative_chains):
+        neg_target = target(negative_path,
+                            negative_chain,
+                            target_hotspot_residues=""
+                           )
+        negative_targets.append(neg_target)
+    
     if not trajectory_exists:
         print("Starting trajectory: "+design_name)
 
         ### Begin binder hallucination
-        trajectory = binder_hallucination(design_name, target_settings["starting_pdb"], target_settings["chains"],
-                                            target_settings["target_hotspot_residues"], length, seed, helicity_value,
-                                            design_models, advanced_settings, design_paths, failure_csv)
+        trajectory = binder_hallucination(design_name,
+                                          main_target, # LG change 
+                                          length, 
+                                          seed, 
+                                          helicity_value,
+                                          design_models, 
+                                          advanced_settings, 
+                                          design_paths, 
+                                          failure_csv,
+                                          negative_targets
+                                         )
         trajectory_metrics = copy_dict(trajectory._tmp["best"]["aux"]["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
         trajectory_pdb = os.path.join(design_paths["Trajectory"], design_name + ".pdb")
 
@@ -199,14 +229,26 @@ while True:
                     complex_prediction_model = mk_afdesign_model(protocol="binder", num_recycles=advanced_settings["num_recycles_validation"], data_dir=advanced_settings["af_params_dir"], 
                                                                 use_multimer=multimer_validation, use_initial_guess=advanced_settings["predict_initial_guess"], use_initial_atom_pos=advanced_settings["predict_bigbang"])
                     if advanced_settings["predict_initial_guess"] or advanced_settings["predict_bigbang"]:
-                        complex_prediction_model.prep_inputs(pdb_filename=trajectory_pdb, chain='A', binder_chain='B', binder_len=length, use_binder_template=True, rm_target_seq=advanced_settings["rm_template_seq_predict"],
-                                                            rm_target_sc=advanced_settings["rm_template_sc_predict"], rm_template_ic=True)
+                        complex_prediction_model.prep_inputs(pdb_filename=trajectory_pdb,
+                                                             main_target=main_target, 
+                                                             binder_chain='B', 
+                                                             binder_len=length, 
+                                                             use_binder_template=True, 
+                                                             rm_target_seq=advanced_settings["rm_template_seq_predict"],
+                                                             rm_target_sc=advanced_settings["rm_template_sc_predict"], 
+                                                             rm_template_ic=True)
                     else:
-                        complex_prediction_model.prep_inputs(pdb_filename=target_settings["starting_pdb"], chain=target_settings["chains"], binder_len=length, rm_target_seq=advanced_settings["rm_template_seq_predict"],
-                                                            rm_target_sc=advanced_settings["rm_template_sc_predict"])
+                        complex_prediction_model.prep_inputs(pdb_filename=target_settings["starting_pdb"],
+                                                             main_target=main_target, 
+                                                             binder_len=length, 
+                                                             rm_target_seq=advanced_settings["rm_template_seq_predict"],
+                                                             rm_target_sc=advanced_settings["rm_template_sc_predict"]
+                                                             )
 
                     # compile binder monomer prediction model
-                    binder_prediction_model = mk_afdesign_model(protocol="hallucination", use_templates=False, initial_guess=False, 
+                    binder_prediction_model = mk_afdesign_model(protocol="hallucination", 
+                                                                use_templates=False, 
+                                                                initial_guess=False, 
                                                                 use_initial_atom_pos=False, num_recycles=advanced_settings["num_recycles_validation"], 
                                                                 data_dir=advanced_settings["af_params_dir"], use_multimer=multimer_validation)
                     binder_prediction_model.prep_inputs(length=length)
