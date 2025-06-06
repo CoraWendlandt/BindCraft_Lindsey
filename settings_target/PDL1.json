@@ -8,4 +8,8 @@
     "number_of_final_designs": 100,
     "negative_paths": ["/home/lindsey/fork/BindCraft/example/2P8V.pdb"],
     "negative_chains": ["A"]
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 0e6d2b8 (debugging why loss negation doesn't kick in immediately after called)

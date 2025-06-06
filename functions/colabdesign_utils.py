@@ -17,24 +17,51 @@ from .biopython_utils import hotspot_residues, calculate_clash_score, calc_ss_pe
 from .pyrosetta_utils import pr_relax, align_pdbs
 from .generic_utils import update_failures
 
+class target:
+    def __init__(self,
+                 starting_pdb,
+                 chains,
+                 target_hotspot_residues=None,
+                 negative_target=False,
+                ):
+        self.pdb_filename = starting_pdb
+        self.chain = chains
+        self.target_hotspot_residues = target_hotspot_residues
+        self.negative_target = negative_target
+
+
 # hallucinate a binder
-def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residues, length, seed, helicity_value, design_models, advanced_settings, design_paths, failure_csv):
+def binder_hallucination(design_name, 
+                         main_target,
+                         length, 
+                         seed, 
+                         helicity_value, 
+                         design_models, 
+                         advanced_settings, 
+                         design_paths, 
+                         failure_csv,
+                         negative_targets
+                         ):
     model_pdb_path = os.path.join(design_paths["Trajectory"], design_name+".pdb")
 
     # clear GPU memory for new trajectory
     clear_mem()
 
     # initialise binder hallucination model
-    af_model = mk_afdesign_model(protocol="binder", debug=False, data_dir=advanced_settings["af_params_dir"], 
-                                use_multimer=advanced_settings["use_multimer_design"], num_recycles=advanced_settings["num_recycles_design"],
-                                best_metric='loss')
+    af_model = mk_afdesign_model(protocol="binder", 
+                                 debug=False, 
+                                 data_dir=advanced_settings["af_params_dir"], 
+                                 use_multimer=advanced_settings["use_multimer_design"], 
+                                 num_recycles=advanced_settings["num_recycles_design"],
+                                 best_metric='loss'
+                                )
 
-    # sanity check for hotspots
-    if target_hotspot_residues == "":
-        target_hotspot_residues = None
-
-    af_model.prep_inputs(pdb_filename=starting_pdb, chain=chain, binder_len=length, hotspot=target_hotspot_residues, seed=seed, rm_aa=advanced_settings["omit_AAs"],
-                        rm_target_seq=advanced_settings["rm_template_seq_design"], rm_target_sc=advanced_settings["rm_template_sc_design"])
+    af_model.prep_inputs(main_target,
+                         binder_len=length,
+                         seed=seed, 
+                         rm_aa=advanced_settings["omit_AAs"],
+                         rm_target_seq=advanced_settings["rm_template_seq_design"], 
+                         rm_target_sc=advanced_settings["rm_template_sc_design"])
 
     ### Update weights based on specified settings
     af_model.opt["weights"].update({"pae":advanced_settings["weights_pae_intra"],
@@ -94,13 +121,18 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
     elif advanced_settings["design_algorithm"] == '4stage':
         # initial logits to prescreen trajectory
         print("Stage 1: Test Logits")
-        af_model.design_logits(iters=50, e_soft=0.9, models=design_models, num_models=1, sample_models=advanced_settings["sample_models"], save_best=True)
+        initial_iters = 50
+        af_model.design_logits(iters=initial_iters, 
+                               e_soft=0.9, 
+                               models=design_models, 
+                               num_models=1, 
+                               sample_models=advanced_settings["sample_models"], 
+                               save_best=True)
 
         # determine pLDDT of best iteration according to lowest 'loss' value
         initial_plddt = get_best_plddt(af_model, length)
-        
         # if best iteration has high enough confidence then continue
-        if initial_plddt > 0.65:
+        if initial_plddt > 0.1: # 0.65
             print("Initial trajectory pLDDT good, continuing: "+str(initial_plddt))
             if advanced_settings["optimise_beta"]:
                 # temporarily dump model to assess secondary structure
@@ -116,17 +148,47 @@ def binder_hallucination(design_name, starting_pdb, chain, target_hotspot_residu
                     print("Beta sheeted trajectory detected, optimising settings")
 
             # how many logit iterations left
-            logits_iter = advanced_settings["soft_iterations"] - 50
+            # logits_iter = advanced_settings["soft_iterations"] - initial_iters
+            logits_iter = 50
             if logits_iter > 0:
-                print("Stage 1: Additional Logits Optimisation")
+                print("Stage 1: Additional Logits Optimisation (Introducing negative targets here)")
                 af_model.clear_best()
-                af_model.design_logits(iters=logits_iter, e_soft=1, models=design_models, num_models=1, sample_models=advanced_settings["sample_models"],
-                                    ramp_recycles=False, save_best=True)
+                af_model.design_logits(iters=logits_iter, 
+                                       e_soft=1, 
+                                       models=design_models, 
+                                       num_models=1, 
+                                       sample_models=advanced_settings["sample_models"],
+                                       ramp_recycles=False, 
+                                       save_best=True)
                 af_model._tmp["seq_logits"] = af_model.aux["seq"]["logits"]
                 logit_plddt = get_best_plddt(af_model, length)
                 print("Optimised logit trajectory pLDDT: "+str(logit_plddt))
             else:
                 logit_plddt = initial_plddt
+
+            print(len(negative_targets), 'NEGATIVE TARGETS SPECIFIED')
+            bias = af_model._inputs["bias"] # store old bias
+            for negative_target in negative_targets:
+                af_model._negative_target = True
+                af_model.prep_inputs(negative_target,
+                                     binder_len=length,
+                                     seed=seed, 
+                                     rm_aa=advanced_settings["omit_AAs"],
+                                     rm_target_seq=advanced_settings["rm_template_seq_design"], 
+                                     rm_target_sc=advanced_settings["rm_template_sc_design"],
+                                     target_update=True # only updating target -- do not reset model!
+                                     )
+                af_model._inputs["bias"] = bias # repopulate old bias
+                af_model.design_logits(iters=logits_iter, 
+                                       e_soft=1, 
+                                       models=design_models, 
+                                       num_models=1, 
+                                       sample_models=advanced_settings["sample_models"],
+                                       ramp_recycles=False, 
+                                       save_best=False
+                                      )
+            print('Ran logits optimization on negative targets')
+            exit()
 
             # perform softmax trajectory design
             if advanced_settings["temporary_iterations"] > 0:
