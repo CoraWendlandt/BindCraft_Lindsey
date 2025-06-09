@@ -121,7 +121,6 @@ while True:
 
     negative_targets = []
     for negative_path, negative_chain in zip(negative_paths, negative_chains):
-        print(negative_path)
         neg_target = target(negative_path,
                             negative_chain,
                             target_hotspot_residues=None,
