@@ -40,6 +40,10 @@ advanced_settings = perform_advanced_settings_check(advanced_settings, bindcraft
 ### generate directories, design path names can be found within the function
 design_paths = generate_directories(target_settings["design_path"])
 
+### copy settings to output directory
+for file in [settings_path, filters_path, advanced_path]:
+    os.system(f'cp {settings_path} {design_paths["Settings"]}')
+
 ### generate dataframes
 trajectory_labels, design_labels, final_labels = generate_dataframe_labels()
 
@@ -90,9 +94,15 @@ while True:
     # generate random seed to vary designs
     seed = int(np.random.randint(0, high=999999, size=1, dtype=int)[0])
 
-    # sample binder design length randomly from defined distribution
-    samples = np.arange(min(target_settings["lengths"]), max(target_settings["lengths"]) + 1)
-    length = np.random.choice(samples)
+    redesign = target_settings["redesign"] # whether or not to use input binder as starter
+    if redesign:
+        binder_chain = target_settings["binder_chain"]
+        length = target_settings["binder_length"]
+    else:
+        binder_chain = None
+        # sample binder design length randomly from defined distribution
+        samples = np.arange(min(target_settings["lengths"]), max(target_settings["lengths"]) + 1)
+        length = np.random.choice(samples)
 
     # load desired helicity value to sample different secondary structure contents
     helicity_value = load_helicity(advanced_settings)
@@ -105,6 +115,7 @@ while True:
     # create main target object
     if target_settings['target_hotspot_residues'] == '':
         target_settings['target_hotspot_residues'] = None
+
     main_target = target(target_settings['starting_pdb'],
                          target_settings['chains'],
                          target_hotspot_residues=target_settings['target_hotspot_residues'],
@@ -142,7 +153,9 @@ while True:
                                           advanced_settings, 
                                           design_paths, 
                                           failure_csv,
-                                          negative_targets
+                                          negative_targets,
+                                          redesign=redesign,
+                                          binder_chain=binder_chain,
                                          )
         trajectory_metrics = copy_dict(trajectory._tmp["best"]["aux"]["log"]) # contains plddt, ptm, i_ptm, pae, i_pae
         trajectory_pdb = os.path.join(design_paths["Trajectory"], design_name + ".pdb")
@@ -168,6 +181,7 @@ while True:
             # Calculate clashes before and after relaxation
             num_clashes_trajectory = calculate_clash_score(trajectory_pdb)
             num_clashes_relaxed = calculate_clash_score(trajectory_relaxed)
+            print('Num clashes - relaxed:', num_clashes_relaxed)
 
             # secondary structure content of starting trajectory binder and interface
             trajectory_alpha, trajectory_beta, trajectory_loops, trajectory_alpha_interface, trajectory_beta_interface, trajectory_loops_interface, trajectory_i_plddt, trajectory_ss_plddt = calc_ss_percentage(trajectory_pdb, advanced_settings, binder_chain)
@@ -237,8 +251,12 @@ while True:
                         complex_prediction_model.prep_inputs(pdb_filename=trajectory_pdb, chain='A', binder_chain='B', binder_len=length, use_binder_template=True, rm_target_seq=advanced_settings["rm_template_seq_predict"],
                                                             rm_target_sc=advanced_settings["rm_template_sc_predict"], rm_template_ic=True)
                     else:
-                        complex_prediction_model.prep_inputs(pdb_filename=target_settings["starting_pdb"], chain=target_settings["chains"], binder_len=length, rm_target_seq=advanced_settings["rm_template_seq_predict"],
-                                                            rm_target_sc=advanced_settings["rm_template_sc_predict"])
+                        complex_prediction_model.prep_inputs(main_target,
+                                                             pdb_filename=target_settings["starting_pdb"], 
+                                                             chain=target_settings["chains"], 
+                                                             binder_len=length, 
+                                                             rm_target_seq=advanced_settings["rm_template_seq_predict"],
+                                                             rm_target_sc=advanced_settings["rm_template_sc_predict"])
 
                     # compile binder monomer prediction model
                     binder_prediction_model = mk_afdesign_model(protocol="hallucination", use_templates=False, initial_guess=False, 
@@ -280,6 +298,8 @@ while True:
                             mpnn_design_pdb = os.path.join(design_paths["MPNN"], f"{mpnn_design_name}_model{model_num+1}.pdb")
                             mpnn_design_relaxed = os.path.join(design_paths["MPNN/Relaxed"], f"{mpnn_design_name}_model{model_num+1}.pdb")
 
+                            print('Design PDB:', mpnn_design_pdb)
+                            print('Relaxed design path:', mpnn_design_relaxed)
                             if os.path.exists(mpnn_design_pdb):
                                 # Calculate clashes before and after relaxation
                                 num_clashes_mpnn = calculate_clash_score(mpnn_design_pdb)
@@ -359,7 +379,9 @@ while True:
                         binder_averages = calculate_averages(binder_statistics)
 
                         # analyze sequence to make sure there are no cysteins and it contains residues that absorb UV for detection
-                        seq_notes = validate_design_sequence(mpnn_sequence['seq'], mpnn_complex_averages.get('Relaxed_Clashes', None), advanced_settings)
+                        seq_notes = validate_design_sequence(mpnn_sequence['seq'], 
+                                                             mpnn_complex_averages.get('Relaxed_Clashes', 0), 
+                                                             advanced_settings)
 
                         # measure time to generate design
                         mpnn_end_time = time.time() - mpnn_time

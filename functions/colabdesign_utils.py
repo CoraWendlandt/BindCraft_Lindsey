@@ -31,6 +31,18 @@ class target:
         self.negative_target = negative_target
 
 
+def update_loss_tracker(loss_tracker_path, loss_tracker_dict):
+    if os.path.isfile(loss_tracker_path):
+        with open(loss_tracker_path, 'r') as f:
+            existing_list = json.load(f)
+        existing_list.append(loss_tracker_dict)
+    else:
+        existing_list = [loss_tracker_dict]
+
+    with open(loss_tracker_path, 'w') as f:
+        json.dump(existing_list, f)
+
+
 # hallucinate a binder
 def binder_hallucination(design_name, 
                          main_target,
@@ -41,10 +53,14 @@ def binder_hallucination(design_name,
                          advanced_settings, 
                          design_paths, 
                          failure_csv,
-                         negative_targets
+                         negative_targets,
+                         redesign=False,
+                         binder_chain=None,
                          ):
     model_pdb_path = os.path.join(design_paths["Trajectory"], design_name+".pdb")
+    loss_tracker_path = os.path.join(design_paths["Trajectory"], f"{design_name}_loss_tracker.json")
 
+    print('Loss tracker path', loss_tracker_path)
     # clear GPU memory for new trajectory
     clear_mem()
 
@@ -57,12 +73,25 @@ def binder_hallucination(design_name,
                                  best_metric='loss'
                                 )
 
-    af_model.prep_inputs(main_target,
-                         binder_len=length,
-                         seed=seed, 
-                         rm_aa=advanced_settings["omit_AAs"],
-                         rm_target_seq=advanced_settings["rm_template_seq_design"], 
-                         rm_target_sc=advanced_settings["rm_template_sc_design"])
+    if redesign:
+        af_model.prep_inputs(main_target,
+                             binder_chain=binder_chain,
+                             use_binder_template=True,
+                             rm_binder=False,
+                             rm_binder_seq=False,
+                             rm_binder_sc=False,
+                             seed=seed, 
+                             rm_aa=advanced_settings["omit_AAs"],
+                             rm_target_seq=advanced_settings["rm_template_seq_design"], 
+                             rm_target_sc=advanced_settings["rm_template_sc_design"]
+                            )
+    else:
+        af_model.prep_inputs(main_target,
+                             binder_len=length,
+                             seed=seed, 
+                             rm_aa=advanced_settings["omit_AAs"],
+                             rm_target_seq=advanced_settings["rm_template_seq_design"], 
+                             rm_target_sc=advanced_settings["rm_template_sc_design"])
 
     ### Update weights based on specified settings
     af_model.opt["weights"].update({"pae":advanced_settings["weights_pae_intra"],
@@ -123,8 +152,9 @@ def binder_hallucination(design_name,
         # initial logits to prescreen trajectory
         print("Stage 1: Test Logits")
         initial_iters = 50
-        af_model._loss_tracker["test_logits"] = []
-        af_model._current_loss_tracker = "test_logits"
+        af_model._loss_tracker = {}
+        af_model._loss_tracker["0_test_logits"] = []
+        af_model._current_loss_tracker = "0_test_logits"
 
         af_model.design_logits(iters=initial_iters, 
                                e_soft=0.9, 
@@ -136,7 +166,7 @@ def binder_hallucination(design_name,
         # determine pLDDT of best iteration according to lowest 'loss' value
         initial_plddt = get_best_plddt(af_model, length)
         # if best iteration has high enough confidence then continue
-        if initial_plddt > 0.65:
+        if initial_plddt > 0.5: # lower plddt requirement
             print("Initial trajectory pLDDT good, continuing: "+str(initial_plddt))
             if advanced_settings["optimise_beta"]:
                 # temporarily dump model to assess secondary structure
@@ -153,12 +183,12 @@ def binder_hallucination(design_name,
 
             # how many logit iterations left
             logits_iter = advanced_settings["soft_iterations"] - initial_iters
+            print("Stage 1: Additional Logits Optimisation")
+
+            af_model._loss_tracker["1_addtl_logits"] = []
+            af_model._current_loss_tracker = "1_addtl_logits"
+
             if logits_iter > 0:
-                print("Stage 1: Additional Logits Optimisation")
-
-                af_model._loss_tracker["addtl_logits"] = []
-                af_model._current_loss_tracker = "addtl_logits"
-
                 af_model.clear_best()
                 af_model.design_logits(iters=logits_iter, 
                                        e_soft=1, 
@@ -167,9 +197,12 @@ def binder_hallucination(design_name,
                                        sample_models=advanced_settings["sample_models"],
                                        ramp_recycles=False, 
                                        save_best=True)
+            else:
+                logits_iter = 25
 
-                bias = af_model._inputs["bias"] # store old bias
-                negative_logits_iter = 25
+            bias = af_model._inputs["bias"] # store old bias
+            negative_logits_iter = 25
+            for i in range(2):
                 for negative_target in negative_targets:
                     af_model._negative_target = True
                     af_model.prep_inputs(negative_target,
@@ -208,18 +241,17 @@ def binder_hallucination(design_name,
                                        sample_models=advanced_settings["sample_models"],
                                        ramp_recycles=False, 
                                        save_best=True)
-                af_model._tmp["seq_logits"] = af_model.aux["seq"]["logits"]
-                logit_plddt = get_best_plddt(af_model, length)
-                print("Optimised logit trajectory pLDDT: "+str(logit_plddt))
-            else:
-                logit_plddt = initial_plddt
+
+            af_model._tmp["seq_logits"] = af_model.aux["seq"]["logits"]
+            logit_plddt = get_best_plddt(af_model, length)
+            print("Optimised logit trajectory pLDDT: "+str(logit_plddt))
 
             # perform softmax trajectory design
             if advanced_settings["temporary_iterations"] > 0:
                 print("Stage 2: Softmax Optimisation")
                 
-                af_model._loss_tracker["softmax"] = []
-                af_model._current_loss_tracker = "softmax"
+                af_model._loss_tracker["2_softmax"] = []
+                af_model._current_loss_tracker = "2_softmax"
 
                 af_model.clear_best()
                 af_model.design_soft(advanced_settings["temporary_iterations"], 
@@ -231,10 +263,31 @@ def binder_hallucination(design_name,
                                      save_best=True)
                 
                 bias = af_model._inputs["bias"] # store old bias
-                negative_logits_iter = 25
-                for negative_target in negative_targets:
-                    af_model._negative_target = True
-                    af_model.prep_inputs(negative_target,
+                negative_temp_iter = 25
+
+                for i in range(2):
+                    for negative_target in negative_targets:
+                        af_model._negative_target = True
+                        af_model.prep_inputs(negative_target,
+                                             binder_len=length,
+                                             seed=seed, 
+                                             rm_aa=advanced_settings["omit_AAs"],
+                                             rm_target_seq=advanced_settings["rm_template_seq_design"], 
+                                             rm_target_sc=advanced_settings["rm_template_sc_design"],
+                                             target_update=True # only updating target -- do not reset model!
+                                             )
+                        af_model._inputs["bias"] = bias # repopulate old bias
+                        af_model.design_soft(negative_temp_iter, 
+                                             e_temp=1e-2, 
+                                             models=design_models, 
+                                             num_models=1,
+                                             sample_models=advanced_settings["sample_models"], 
+                                             ramp_recycles=False, 
+                                             save_best=False)
+
+                    # One more round of main target design
+                    af_model._negative_target = False
+                    af_model.prep_inputs(main_target,
                                          binder_len=length,
                                          seed=seed, 
                                          rm_aa=advanced_settings["omit_AAs"],
@@ -249,46 +302,27 @@ def binder_hallucination(design_name,
                                          num_models=1,
                                          sample_models=advanced_settings["sample_models"], 
                                          ramp_recycles=False, 
-                                         save_best=False)
-
-                # One more round of main target design
-                af_model._negative_target = False
-                af_model.prep_inputs(main_target,
-                                     binder_len=length,
-                                     seed=seed, 
-                                     rm_aa=advanced_settings["omit_AAs"],
-                                     rm_target_seq=advanced_settings["rm_template_seq_design"], 
-                                     rm_target_sc=advanced_settings["rm_template_sc_design"],
-                                     target_update=True # only updating target -- do not reset model!
-                                     )
-                af_model._inputs["bias"] = bias # repopulate old bias
-                af_model.design_soft(advanced_settings["temporary_iterations"], 
-                                     e_temp=1e-2, 
-                                     models=design_models, 
-                                     num_models=1,
-                                     sample_models=advanced_settings["sample_models"], 
-                                     ramp_recycles=False, 
-                                     save_best=True)
+                                         save_best=True)
 
                 softmax_plddt = get_best_plddt(af_model, length)
             else:
                 softmax_plddt = logit_plddt            
 
             # perform one hot encoding
-            if softmax_plddt > 0.65:
+            if softmax_plddt > 0.5: # lower plddt requirement
                 print("Softmax trajectory pLDDT good, continuing: "+str(softmax_plddt))
                 if advanced_settings["hard_iterations"] > 0:
                     af_model.clear_best()
                     print("Stage 3: One-hot Optimisation")
                     
-                    af_model._loss_tracker["one-hot"] = []
-                    af_model._current_loss_tracker = "one-hot"
+                    af_model._loss_tracker["3_one-hot"] = []
+                    af_model._current_loss_tracker = "3_one-hot"
 
                     af_model.design_hard(advanced_settings["hard_iterations"], temp=1e-2, models=design_models, num_models=1,
                                     sample_models=advanced_settings["sample_models"], dropout=False, ramp_recycles=False, save_best=True)
                     onehot_plddt = get_best_plddt(af_model, length)
 
-                if onehot_plddt > 0.65:
+                if onehot_plddt > 0.5: # lower plddt requirement
                     # perform greedy mutation optimisation
                     print("One-hot trajectory pLDDT good, continuing: "+str(onehot_plddt))
                     if advanced_settings["greedy_iterations"] > 0:
@@ -297,14 +331,17 @@ def binder_hallucination(design_name,
                                                         num_models=1, sample_models=advanced_settings["sample_models"], ramp_models=False, save_best=True)
 
                 else:
+                    update_loss_tracker(loss_tracker_path, af_model._loss_tracker)
                     update_failures(failure_csv, 'Trajectory_one-hot_pLDDT')
                     print("One-hot trajectory pLDDT too low to continue: "+str(onehot_plddt))
 
             else:
+                update_loss_tracker(loss_tracker_path, af_model._loss_tracker)
                 update_failures(failure_csv, 'Trajectory_softmax_pLDDT')
                 print("Softmax trajectory pLDDT too low to continue: "+str(softmax_plddt))
 
         else:
+            update_loss_tracker(loss_tracker_path, af_model._loss_tracker)
             update_failures(failure_csv, 'Trajectory_logits_pLDDT')
             print("Initial trajectory pLDDT too low to continue: "+str(initial_plddt))
 
@@ -313,6 +350,7 @@ def binder_hallucination(design_name,
         exit()
         return
 
+    update_loss_tracker(loss_tracker_path, af_model._loss_tracker)
     ### save trajectory PDB
     final_plddt = get_best_plddt(af_model, length)
     af_model.save_pdb(model_pdb_path)
@@ -331,7 +369,7 @@ def binder_hallucination(design_name,
         print("")
     else:
         # check if low quality prediction
-        if final_plddt < 0.7:
+        if final_plddt < 0.5: # lower plddt requirement
             af_model.aux["log"]["terminate"] = "LowConfidence"
             update_failures(failure_csv, 'Trajectory_final_pLDDT')
             print("Trajectory starting confidence low, skipping analysis and MPNN optimisation")
