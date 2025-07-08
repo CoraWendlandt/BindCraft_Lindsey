@@ -202,7 +202,7 @@ def binder_hallucination(design_name,
 
             bias = af_model._inputs["bias"] # store old bias
             negative_logits_iter = 25
-            for i in range(2):
+            for i in range(3):
                 for negative_target in negative_targets:
                     af_model._negative_target = True
                     af_model.prep_inputs(negative_target,
@@ -265,7 +265,7 @@ def binder_hallucination(design_name,
                 bias = af_model._inputs["bias"] # store old bias
                 negative_temp_iter = 25
 
-                for i in range(2):
+                for i in range(3):
                     for negative_target in negative_targets:
                         af_model._negative_target = True
                         af_model.prep_inputs(negative_target,
