@@ -53,7 +53,6 @@ def binder_hallucination(design_name,
                          advanced_settings, 
                          design_paths, 
                          failure_csv,
-                         negative_targets,
                          redesign=False,
                          binder_chain=None,
                          ):
@@ -203,47 +202,6 @@ def binder_hallucination(design_name,
                 logits_iter = 25
 
             bias = af_model._inputs["bias"] # store old bias
-            negative_logits_iter = 25
-            for i in range(3):
-                for negative_target in negative_targets:
-                    af_model._negative_target = True
-                    af_model.prep_inputs(negative_target,
-                                         binder_len=length,
-                                         seed=seed, 
-                                         rm_aa=advanced_settings["omit_AAs"],
-                                         rm_target_seq=advanced_settings["rm_template_seq_design"], 
-                                         rm_target_sc=advanced_settings["rm_template_sc_design"],
-                                         target_update=True # only updating target -- do not reset model!
-                                         )
-                    af_model._inputs["bias"] = bias # repopulate old bias
-                    af_model.design_logits(iters=negative_logits_iter, 
-                                           e_soft=1, 
-                                           models=design_models, 
-                                           num_models=1, 
-                                           sample_models=advanced_settings["sample_models"],
-                                           ramp_recycles=False, 
-                                           save_best=False
-                                          )
-
-                # One more round of main target design
-                af_model._negative_target = False
-                af_model.prep_inputs(main_target,
-                                     binder_len=length,
-                                     seed=seed, 
-                                     rm_aa=advanced_settings["omit_AAs"],
-                                     rm_target_seq=advanced_settings["rm_template_seq_design"], 
-                                     rm_target_sc=advanced_settings["rm_template_sc_design"],
-                                     target_update=True # only updating target -- do not reset model!
-                                     )
-                af_model._inputs["bias"] = bias # repopulate old bias
-                af_model.design_logits(iters=logits_iter, 
-                                       e_soft=1, 
-                                       models=design_models, 
-                                       num_models=1, 
-                                       sample_models=advanced_settings["sample_models"],
-                                       ramp_recycles=False, 
-                                       save_best=True)
-                print('here2')
 
             af_model._tmp["seq_logits"] = af_model.aux["seq"]["logits"]
             logit_plddt = get_best_plddt(af_model, length)
@@ -266,47 +224,6 @@ def binder_hallucination(design_name,
                                      save_best=True)
                 
                 bias = af_model._inputs["bias"] # store old bias
-                negative_temp_iter = 25
-
-                for i in range(3):
-                    for negative_target in negative_targets:
-                        af_model._negative_target = True
-                        af_model.prep_inputs(negative_target,
-                                             binder_len=length,
-                                             seed=seed, 
-                                             rm_aa=advanced_settings["omit_AAs"],
-                                             rm_target_seq=advanced_settings["rm_template_seq_design"], 
-                                             rm_target_sc=advanced_settings["rm_template_sc_design"],
-                                             target_update=True # only updating target -- do not reset model!
-                                             )
-                        af_model._inputs["bias"] = bias # repopulate old bias
-                        af_model.design_soft(negative_temp_iter, 
-                                             e_temp=1e-2, 
-                                             models=design_models, 
-                                             num_models=1,
-                                             sample_models=advanced_settings["sample_models"], 
-                                             ramp_recycles=False, 
-                                             save_best=False)
-
-                    # One more round of main target design
-                    af_model._negative_target = False
-                    af_model.prep_inputs(main_target,
-                                         binder_len=length,
-                                         seed=seed, 
-                                         rm_aa=advanced_settings["omit_AAs"],
-                                         rm_target_seq=advanced_settings["rm_template_seq_design"], 
-                                         rm_target_sc=advanced_settings["rm_template_sc_design"],
-                                         target_update=True # only updating target -- do not reset model!
-                                         )
-                    af_model._inputs["bias"] = bias # repopulate old bias
-                    af_model.design_soft(advanced_settings["temporary_iterations"], 
-                                         e_temp=1e-2, 
-                                         models=design_models, 
-                                         num_models=1,
-                                         sample_models=advanced_settings["sample_models"], 
-                                         ramp_recycles=False, 
-                                         save_best=True)
-
                 softmax_plddt = get_best_plddt(af_model, length)
             else:
                 softmax_plddt = logit_plddt            

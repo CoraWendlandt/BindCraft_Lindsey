@@ -95,6 +95,7 @@ while True:
     seed = int(np.random.randint(0, high=999999, size=1, dtype=int)[0])
 
     redesign = target_settings["redesign"] # whether or not to use input binder as starter
+    print('Redesigning binder:', redesign)
     if redesign:
         binder_chain = target_settings["binder_chain"]
         length = target_settings["binder_length"]
@@ -119,26 +120,8 @@ while True:
     main_target = target(target_settings['starting_pdb'],
                          target_settings['chains'],
                          target_hotspot_residues=target_settings['target_hotspot_residues'],
-                         negative_target=False
+                         negative_target=False # vestige from LG code
                         )
-    
-    # create negative target objects
-    if 'negative_paths' in target_settings:
-        negative_paths = target_settings['negative_paths']
-        negative_chains = target_settings['negative_chains']
-    else:
-        negative_paths = []
-        negative_chains = []
-
-    negative_targets = []
-    for negative_path, negative_chain in zip(negative_paths, negative_chains):
-        neg_target = target(negative_path,
-                            negative_chain,
-                            target_hotspot_residues=None,
-                            negative_target=True
-                           )
-        negative_targets.append(neg_target)
-
 
     if not trajectory_exists:
         print("Starting trajectory: "+design_name)
@@ -153,7 +136,6 @@ while True:
                                           advanced_settings, 
                                           design_paths, 
                                           failure_csv,
-                                          negative_targets,
                                           redesign=redesign,
                                           binder_chain=binder_chain,
                                          )
