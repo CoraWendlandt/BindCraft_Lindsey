@@ -72,6 +72,7 @@ def binder_hallucination(design_name,
                                  num_recycles=advanced_settings["num_recycles_design"],
                                  best_metric='loss'
                                 )
+    af_model.fixed_positions = advanced_settings['fixed_binder_positions']
 
     if redesign:
         af_model.prep_inputs(main_target,
@@ -197,6 +198,7 @@ def binder_hallucination(design_name,
                                        sample_models=advanced_settings["sample_models"],
                                        ramp_recycles=False, 
                                        save_best=True)
+                print('here1')
             else:
                 logits_iter = 25
 
@@ -241,6 +243,7 @@ def binder_hallucination(design_name,
                                        sample_models=advanced_settings["sample_models"],
                                        ramp_recycles=False, 
                                        save_best=True)
+                print('here2')
 
             af_model._tmp["seq_logits"] = af_model.aux["seq"]["logits"]
             logit_plddt = get_best_plddt(af_model, length)

@@ -2,10 +2,9 @@
 #SBATCH --nodes 1
 #SBATCH --ntasks 1
 #SBATCH --cpus-per-task 1
-#SBATCH --partition=gpu
-#SBATCH --qos=gpu
-#SBATCH --gres=gpu:1
-#SBATCH --mem 42gb
+#SBATCH --partition=pi_keating
+#SBATCH --gres=gpu:a100:1
+#SBATCH --mem 42G
 #SBATCH --time 72:00:00
 #SBATCH --output=bindcraft_%A.log
 
@@ -19,7 +18,7 @@ export LD_LIBRARY_PATH=${CONDA_BASE}/lib
 
 # Get the directory where the bindcraft script is located
 SCRIPT_DIR=$(dirname "$0")
-
+SCRIPT_DIR=/pool001/coraw/BindCraft_Lindsey
 # Parsing command line options
 SETTINGS=""
 FILTERS=""

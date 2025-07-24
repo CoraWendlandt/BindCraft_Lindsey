@@ -1,9 +1,15 @@
 #!/bin/bash
+#SBATCH -p pi_keating
+#SBATCH -c 4
+#SBATCH --mem=16G
+#SBATCH --gres=gpu:a100:1
 ################## BindCraft installation script
 ################## specify conda/mamba folder, and installation folder for git repositories, and whether to use mamba or $pkg_manager
 # Default value for pkg_manager
+source ~/.bashrc
+module load cuda/12.4.0
 pkg_manager='conda'
-cuda=''
+cuda='12.4'
 
 # Define the short and long options
 OPTIONS=p:c:

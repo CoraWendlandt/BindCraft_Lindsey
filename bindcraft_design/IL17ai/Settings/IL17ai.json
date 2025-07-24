@@ -1,0 +1,11 @@
+{
+    "design_path": "/pool001/coraw/BindCraft_Lindsey/bindcraft_design/IL17ai",
+    "binder_name": "IL17ai_binder_starting_structure",
+    "starting_pdb": "/pool001/coraw/BindCraft_Lindsey/inputs/IL17ai/IL17aig4sx3_MCoTI_gg.pdb",
+    "target_hotspot_residues": "",
+    "chains": "A",
+    "binder_chain": "B",
+    "binder_length": 40,
+    "redesign": true,
+    "number_of_final_designs": 10
+}
